@@ -103,6 +103,63 @@ async def add_menu_item(
         restaurant_name=r_db.name
     )
 
+# 6. UPDATE MENU ITEM (Price, Name, Desc)
+@router.patch("/menu/{item_id}", response_model=schemas.MenuItemResponse)
+async def update_menu_item(
+    item_id: int,
+    updates: schemas.MenuItemUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.UserDB = Depends(auth.get_current_user)
+):
+    # 1. Find the Item
+    item_db = db.query(models.MenuItemDB).filter(models.MenuItemDB.id == item_id).first()
+    if not item_db:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    
+    # 2. Security Check: Does the current user own the restaurant this item belongs to?
+    # We access the relationship 'item_db.restaurant' to check the owner_id
+    if item_db.restaurant.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this item")
+    
+    # 3. Apply Updates
+    update_data = updates.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(item_db, key, value)
+        
+    db.commit()
+    db.refresh(item_db)
+    
+    # 4. Return formatted response (we need restaurant name for the schema)
+    return schemas.MenuItemResponse(
+        id=item_db.id,
+        name=item_db.name,
+        description=item_db.description,
+        price=item_db.price,
+        restaurant_name=item_db.restaurant.name
+    )
+
+# 7. DELETE MENU ITEM
+@router.delete("/menu/{item_id}")
+async def delete_menu_item(
+    item_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.UserDB = Depends(auth.get_current_user)
+):
+    # 1. Find the Item
+    item_db = db.query(models.MenuItemDB).filter(models.MenuItemDB.id == item_id).first()
+    if not item_db:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    
+    # 2. Security Check
+    if item_db.restaurant.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this item")
+    
+    # 3. Delete
+    db.delete(item_db)
+    db.commit()
+    
+    return {"message": "Menu item deleted successfully"}
+
 # 5. PUBLIC: GET ALL MENU ITEMS (Feed for Users)
 @router.get("/menu/all", response_model=List[schemas.MenuItemResponse])
 async def get_all_menu_items(db: Session = Depends(database.get_db)):
